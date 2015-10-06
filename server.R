@@ -19,7 +19,7 @@ library(rv)
 library(shiny)
 
 source("GetSuccessRates.R") #This file contains the code to compute the predicted pass rates
-source("http://gsubfn.googlecode.com/svn/trunk/R/list.R") #this contains code that allows functions to return lists
+source("list.R") #this contains code that allows functions to return lists
 
 shinyServer(function(input, output) {
   output$response = reactive({
