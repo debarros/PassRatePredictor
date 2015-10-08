@@ -6,7 +6,9 @@
 #  1.csv - predictor scores, along with student ID, from prior year
 #  2.csv - predictor scores, along with student ID, from current year
 #  regents.csv - regents scores, along with student ID, from prior year
-#In all cases, the column headers should be StudNum, Score.
+#The program expects there to be a header row in the data files
+#The column headers can be anything, as long as the first column has ID's and the second has scores.
+#The file names can also be whatever you want them to be.
 
 #If prior data is being pulled from multiple years:
 #  Predictor and regents scores get matched by student ID
@@ -15,67 +17,91 @@
 #  Then combine the 1.csv and regents.csv for the two years
 
 
-library(rv)
-library(shiny)
+#Load the required libraries and other source code
+#The file "functions.R" actually just includes commands to load other libraries and source files
+source("functions.R")
 
-source("GetSuccessRates.R") #This file contains the code to compute the predicted pass rates
-source("list.R") #this contains code that allows functions to return lists
 
+#The following is the function that runs on the server side
 shinyServer(function(input, output) {
-  output$response = reactive({
-    d1.in = input$d1
-    d2.in = input$d2
-    regents.in = input$regents
-    if(is.null(d1.in)){return("")} #wait until the files are loaded
-    if(is.null(d2.in)){return("")} #wait until the files are loaded
-    if(is.null(regents.in)){return("")} #wait until the files are loaded
-    d1 = read.csv(d1.in$datapath)  # Read in the prior year predictor
-    d2 = read.csv(d2.in$datapath)  # Read in the new data
-    regents = read.csv(regents.in$datapath)  # Read in the prior regents scores
+  
+  print("running shinyServer")
+  
+  #This converts the selected confidence interval from ui drop down into a end points of the confidence interval
+  ConfPoints = reactive({ 
+    switch(input$alphaLevel,      #"switch" acts as a lookup, converting the selected confidence level into a pair of numbers
+           "90%" = c(11,191),
+           "95%" = c(6,196),
+           "99%" = c(2,200)) #note that there are 201 elements in the vector, so 200 corresponds to the .995 quantile
+  }) #end of function to define ConfPoints
+  
+  
+  #Create variables to hold the inputs
+  d1.in = reactive({input$d1})
+  d2.in = reactive({input$d2})
+  regents.in = reactive({input$regents})
+  
+  
+  #Calculate the possible pass rates.  
+  #This will run once when all three files are uploaded
+  #It will run again each a new file is uploaded
+  PassRates <- reactive({
+    print("running PassRates function")
     
-    #Rename the columns
-    colnames(d1) = c("StudNum","Score")
-    colnames(d2) = c("StudNum","Score")
-    colnames(regents) = c("StudNum","Score")
+    if(is.null(d1.in())){return("")}            #wait until the files are loaded
+    if(is.null(d2.in())){return("")}            #wait until the files are loaded
+    if(is.null(regents.in())){return("")}       #wait until the files are loaded
     
-    #Match the regents scores with the predictor scores
-    for (i in 1:nrow(d1)){
-      if (d1$StudNum[i] %in% regents$StudNum){ #if this student has an outcome score
-        d1$Regents[i] = regents$Score[which(regents$StudNum == d1$StudNum[i])] #put the outcome score in that row
-      }else{ # if the student does not have an outcome score
-        d1$Regents[i] = NA # put NA in that row
-      }
-      d1$drop[i] = sum(is.na(d1[i,])) #indicate whether the row should be dropped
-    } #end of for loop
+    d1 = read.csv(d1.in()$datapath)             #Read in the prior year predictor
+    d2 = read.csv(d2.in()$datapath)             #Read in the new data
+    regents = read.csv(regents.in()$datapath)   #Read in the prior regents scores
     
-    #Get rid of the missing data rows
-    #In d1, the drop variable indicates whether it should be kept (0) or dropped (>0)
-    d1 = d1[which(d1$drop == 0),] #subset d1 to only the rows with complete data
-    d2$drop = is.na(d2$StudNum) #In d2, the drop variable indicates whether the row includes actual data (in case there are extra empty rows at the bottom)
-    d2 = d2[which(d2$drop == FALSE),] #subset d2 to only those rows that have a student number
+    list[d1, d2] <- CleanData(d1, d2, regents)  #Clean up the data
     
-    #Create the Passed variable
-    d1$Passed = 0 #set the default value to fail
-    d1$Passed[which(d1$Regents > 64)] = 1 #set any outcome score greater than 64 to pass (this will need to be >= PassCutoff, after PassCutoff is defined)
+    GetSuccessRates(d1,d2)                      #get the pass rates and return them
+  }) #end of function to define PassRates
+  
+  
+  
+  #Set the upper and lower bounds of the confidence interval
+  #This will run each time PassRates are calculated, or ConfPoints is changed
+  CI = reactive({quantile(PassRates(), probs = seq(0,1,.005), names = F)[ConfPoints()]*100})
+  
+  output$response = reactive({    
     
-    #Get the predicted pass rates
-    list[PassRates,new.probs] = GetSuccessRates(d1,d2)
+    print("running reactive function to get output$response")
     
-    #select the locations of the quantiles of the confidence intervals
-    ConfPoints = switch(input$alphaLevel,
-                        "90%" = c(11,191),
-                        "95%" = c(6,196),
-                        "99%" = c(2,200)) #note that there are 201 elements in the vector, so 200 corresponds to the .995 quantile
+    if(is.null(d1.in())){return("")}            #wait until the files are loaded
+    if(is.null(d2.in())){return("")}            #wait until the files are loaded
+    if(is.null(regents.in())){return("")}       #wait until the files are loaded
     
-    #select the actual confidence interval quantiles
-    CI = quantile(PassRates, probs = seq(0,1,.005), names = F)[ConfPoints]*100
-    
-    #produce the output
     paste0(c("If all students take the ", 
-             input$testName, " regents, ",
-             "I predict a pass rate of  ", round(mean(new.probs)*100), "%.  ",
-             "I am ", input$alphaLevel , " sure that the pass rate will be between ",
-             as.character(round(CI[1])), "% and ", as.character(round(CI[2])), "%."),
-           collapse = "")
+             input$testName, " regents, ",                                                 #The "testName" component of the "input" object holds the title of the test, as typed in by the user
+             "I predict a pass rate of  ", 
+             round(mean(PassRates())*100), "%.  ",           #This shows the average pass rate across all the simulations
+             "I am ", input$alphaLevel , 
+             " sure that the pass rate will be between ",      #This shows the confidence level selected by the user
+             as.character(round(CI()[1])), "% and ", 
+             as.character(round(CI()[2])), "%."),  #This pulls the upper and lower bounds of the confidence interval
+           collapse = "")                                                                  #This says to put the text together with nothing separating the parts
+    
   }) #end of reactive function defining output$response
+  
+  
+  
+  output$Sample1 <- downloadHandler(
+    filename = "SampleOldPredictor.csv",
+    content = function(file) {write.csv(Sample1, row.names = FALSE, file)}
+  )
+  
+  output$Sample2 <- downloadHandler(
+    filename = "SampleNewPredictor.csv",
+    content = function(file) {write.csv(Sample2, row.names = FALSE, file)}
+  )
+  
+  output$Sample3 <- downloadHandler(
+    filename = "SampleRegents.csv",
+    content = function(file) {write.csv(Sample3, row.names = FALSE, file)}
+  )
+  
 }) #end of shinyServer
