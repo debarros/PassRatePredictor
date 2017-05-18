@@ -27,7 +27,7 @@ shinyServer(function(input, output) {
   
   print("running shinyServer")
   
-  #This converts the selected confidence interval from ui drop down into a end points of the confidence interval
+  #This converts the selected confidence interval from ui drop down into end points of the confidence interval
   ConfPoints = reactive({ 
     switch(input$alphaLevel,      #"switch" acts as a lookup, converting the selected confidence level into a pair of numbers
            "90%" = c(11,191),
@@ -75,15 +75,9 @@ shinyServer(function(input, output) {
     if(is.null(d2.in())){return("")}            #wait until the files are loaded
     if(is.null(regents.in())){return("")}       #wait until the files are loaded
     
-    paste0(c("If all students take the ", 
-             input$testName, " regents, ",                                                 #The "testName" component of the "input" object holds the title of the test, as typed in by the user
-             "I predict a pass rate of  ", 
-             round(mean(PassRates())*100), "%.  ",           #This shows the average pass rate across all the simulations
-             "I am ", input$alphaLevel , 
-             " sure that the pass rate will be between ",      #This shows the confidence level selected by the user
-             as.character(round(CI()[1])), "% and ", 
-             as.character(round(CI()[2])), "%."),  #This pulls the upper and lower bounds of the confidence interval
-           collapse = "")                                                                  #This says to put the text together with nothing separating the parts
+    outSent = OutputSentence(testName = input$testName, PassRates = PassRates(), alphaLevel = input$alphaLevel, CI = CI())
+    
+    return(outSent)
     
   }) #end of reactive function defining output$response
   
